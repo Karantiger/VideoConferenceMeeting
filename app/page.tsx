@@ -6,6 +6,7 @@ import useUser from "@/hooks/useUser";
 import { useEffect, useState, useMemo, useCallback, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { v4 as uuid } from "uuid";
+import { SpeedInsights } from "@vercel/speed-insights/next"
 
 // Home Component
 export default function Home() {
