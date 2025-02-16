@@ -25,6 +25,7 @@ interface RoomProps {
  * LEAVE_REDIRECT_DELAY: Delay before redirecting after leaving room
  */
 const RETRY_DELAY = 5000;
+const JOIN_TIMEOUT = 8000;
 const MEETING_DURATION = 18000; // 5 hours in seconds
 const LEAVE_REDIRECT_DELAY = 500; // 500ms delay for redirect
 
