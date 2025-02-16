@@ -5,6 +5,7 @@ import { ZegoUIKitPrebuilt } from '@zegocloud/zego-uikit-prebuilt';
 import { v4 as uuid } from 'uuid';
 import * as React from 'react';
 import { useSearchParams } from 'next/navigation';
+import { SpeedInsights } from "@vercel/speed-insights/next"
 
 /**
  * Type definitions for route parameters
@@ -201,6 +202,7 @@ const Room = ({ params }: RoomProps) => {
           </button>
         </div>
       )}
+      <SpeedInsights />
     </>
   );
 };
