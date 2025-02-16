@@ -5,7 +5,7 @@ import { ZegoUIKitPrebuilt } from '@zegocloud/zego-uikit-prebuilt';
 import { v4 as uuid } from 'uuid';
 import * as React from 'react';
 import { useSearchParams } from 'next/navigation';
-import { SpeedInsights } from "@vercel/speed-insights/next"
+import { SpeedInsights } from "@vercel/speed-insights/next";
 
 /**
  * Type definitions for route parameters
@@ -24,11 +24,13 @@ interface RoomProps {
  * JOIN_TIMEOUT: Maximum time to wait for join
  * MEETING_DURATION: 5 hours in seconds (5 * 60 * 60 = 18000)
  * LEAVE_REDIRECT_DELAY: Delay before redirecting after leaving room
+ * MAX_RETRIES: Maximum number of retries for network failures
  */
 const RETRY_DELAY = 5000;
 const JOIN_TIMEOUT = 8000;
 const MEETING_DURATION = 18000; // 5 hours in seconds
 const LEAVE_REDIRECT_DELAY = 500; // 500ms delay for redirect
+const MAX_RETRIES = 3; // Maximum number of retries for network errors
 
 const Room = ({ params }: RoomProps) => {
   const searchParams = useSearchParams();
@@ -36,20 +38,17 @@ const Room = ({ params }: RoomProps) => {
   const roomId = searchParams.get('roomID') || paramsValue?.roomid;
   const { fullName } = useUser();
 
-  // Refs for managing component state
   const myCallContainerRef = React.useRef<HTMLDivElement | null>(null);
   const zegoRef = React.useRef<any>(null);
   const [connectionError, setConnectionError] = React.useState<string | null>(null);
+  const [retryCount, setRetryCount] = React.useState<number>(0);
 
-  /**
-   * Cleanup function to stop all media tracks and clear resources
-   */
   const cleanupMedia = React.useCallback(() => {
     const mediaDevices = navigator.mediaDevices as any;
     if (mediaDevices?.getTracks) {
       mediaDevices.getTracks().forEach((track: MediaStreamTrack) => track.stop());
     }
-    
+
     const tracks = [...document.getElementsByTagName('video'), ...document.getElementsByTagName('audio')];
     tracks.forEach(track => {
       if (track.srcObject) {
@@ -64,20 +63,13 @@ const Room = ({ params }: RoomProps) => {
     }
   }, []);
 
-  /**
-   * Handle room leave and redirect
-   */
   const handleLeaveRoom = React.useCallback(() => {
     cleanupMedia();
-    // Quick redirect after cleanup
     setTimeout(() => {
       window.location.href = '/';
     }, LEAVE_REDIRECT_DELAY);
   }, [cleanupMedia]);
 
-  /**
-   * Initialize the video conference meeting
-   */
   const initializeMeeting = React.useCallback(async () => {
     if (!roomId) {
       setConnectionError('No room ID provided');
@@ -89,12 +81,10 @@ const Room = ({ params }: RoomProps) => {
       const serverSecret = process.env.NEXT_PUBLIC_ZEGO_SERVER_SECRET!;
 
       if (isNaN(appID)) { throw new Error('Invalid App ID');}
-
       if (!serverSecret) {
         throw new Error('Server Secret is missing');
       }
 
-      // Generate token with 5-hour duration
       const kitToken = ZegoUIKitPrebuilt.generateKitTokenForTest(
         appID,
         serverSecret,
@@ -123,23 +113,28 @@ const Room = ({ params }: RoomProps) => {
           turnOnMicrophoneWhenJoining: false,
           preJoinViewConfig: {
             title: 'Join Meeting',
-            message: 'Please test your devices before joining'
+            message: 'Please test your devices before joining',
           },
           onNetworkStatusError: (err: any) => {
             console.error('Network error:', err);
             setConnectionError('Network connection error. Attempting to reconnect...');
-            // Attempt to reconnect after delay
-            setTimeout(() => {
-              cleanupMedia();
-              initializeMeeting();
-            }, RETRY_DELAY);
+            if (retryCount < MAX_RETRIES) {
+              setRetryCount(prevCount => prevCount + 1);
+              setTimeout(() => {
+                cleanupMedia();
+                initializeMeeting();
+              }, RETRY_DELAY);
+            } else {
+              setConnectionError('Maximum retry attempts reached. Please check your network.');
+            }
           },
           onConnectionStateChanged: (state: string) => {
             if (state === 'CONNECTED') {
               setConnectionError(null);
+              setRetryCount(0); // Reset retry count on successful connection
             }
           },
-          onLeaveRoom: handleLeaveRoom, // Use new handler with quick redirect
+          onLeaveRoom: handleLeaveRoom,
           onDeviceError: (errorCode: any, message: string) => {
             console.error("Device error:", errorCode, message);
             setConnectionError(`Device error: ${message}`);
@@ -150,22 +145,16 @@ const Room = ({ params }: RoomProps) => {
       console.error("Zego initialization error:", error);
       setConnectionError('Failed to initialize meeting. Please try again.');
     }
-  }, [roomId, fullName, handleLeaveRoom, cleanupMedia]);
+  }, [roomId, fullName, handleLeaveRoom, cleanupMedia, retryCount]);
 
-  /**
-   * Setup and cleanup effects
-   */
   React.useEffect(() => {
     initializeMeeting();
-    
+
     return () => {
       cleanupMedia();
     };
   }, [initializeMeeting, cleanupMedia]);
 
-  /**
-   * Error state when no room ID is provided
-   */
   if (!roomId) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -177,9 +166,6 @@ const Room = ({ params }: RoomProps) => {
     );
   }
 
-  /**
-   * Main render
-   */
   return (
     <>
       <div
