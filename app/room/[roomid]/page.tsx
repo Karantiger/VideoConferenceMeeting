@@ -1,12 +1,15 @@
 "use client";
 
-import useUser from '@/hooks/useUser';
-import { ZegoUIKitPrebuilt } from '@zegocloud/zego-uikit-prebuilt';
-import { v4 as uuid } from 'uuid';
-import * as React from 'react';
-import { useSearchParams } from 'next/navigation';
-import { SpeedInsights } from "@vercel/speed-insights/next"
+import useUser from "@/hooks/useUser";
+import { ZegoUIKitPrebuilt } from "@zegocloud/zego-uikit-prebuilt";
+import { v4 as uuid } from "uuid";
+import * as React from "react";
+import { useSearchParams } from "next/navigation";
+import { SpeedInsights } from "@vercel/speed-insights/next";
 
+/**
+ * Type definitions for route parameters
+ */
 interface RouteParams {
   roomid?: string;
 }
@@ -15,6 +18,13 @@ interface RoomProps {
   params: Promise<RouteParams>;
 }
 
+/**
+ * Constants for timing and configuration
+ * RETRY_DELAY: Time between retry attempts
+ * JOIN_TIMEOUT: Maximum time to wait for join
+ * MEETING_DURATION: 5 hours in seconds (5 * 60 * 60 = 18000)
+ * LEAVE_REDIRECT_DELAY: Delay before redirecting after leaving room
+ */
 const RETRY_DELAY = 5000;
 const JOIN_TIMEOUT = 8000;
 const MEETING_DURATION = 18000; // 5 hours in seconds
@@ -23,25 +33,31 @@ const LEAVE_REDIRECT_DELAY = 500; // 500ms delay for redirect
 const Room = ({ params }: RoomProps) => {
   const searchParams = useSearchParams();
   const paramsValue = React.use(params);
-  const roomId = searchParams.get('roomID') || paramsValue?.roomid;
+  const roomId = searchParams.get("roomID") || paramsValue?.roomid;
   const { fullName } = useUser();
 
+  // Refs for managing component state
   const myCallContainerRef = React.useRef<HTMLDivElement | null>(null);
   const zegoRef = React.useRef<any>(null);
   const [connectionError, setConnectionError] = React.useState<string | null>(null);
-  const [meetingStarted, setMeetingStarted] = React.useState(false);
 
+  /**
+   * Cleanup function to stop all media tracks and clear resources
+   */
   const cleanupMedia = React.useCallback(() => {
     const mediaDevices = navigator.mediaDevices as any;
     if (mediaDevices?.getTracks) {
       mediaDevices.getTracks().forEach((track: MediaStreamTrack) => track.stop());
     }
-    
-    const tracks = [...document.getElementsByTagName('video'), ...document.getElementsByTagName('audio')];
-    tracks.forEach(track => {
+
+    const tracks = [
+      ...document.getElementsByTagName("video"),
+      ...document.getElementsByTagName("audio"),
+    ];
+    tracks.forEach((track) => {
       if (track.srcObject) {
         const mediaStream = track.srcObject as MediaStream;
-        mediaStream.getTracks().forEach(track => track.stop());
+        mediaStream.getTracks().forEach((track) => track.stop());
       }
     });
 
@@ -51,48 +67,46 @@ const Room = ({ params }: RoomProps) => {
     }
   }, []);
 
+  /**
+   * Handle room leave and redirect
+   */
   const handleLeaveRoom = React.useCallback(() => {
     cleanupMedia();
+    // Quick redirect after cleanup
     setTimeout(() => {
-      window.location.href = '/';
+      window.location.href = "/";
     }, LEAVE_REDIRECT_DELAY);
   }, [cleanupMedia]);
 
-  const requestMediaPermissions = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
-      stream.getTracks().forEach(track => track.stop());
-    } catch (error) {
-      console.error('Error accessing media devices:', error);
-      setConnectionError('Please allow access to microphone and camera.');
-    }
-  };
-
+  /**
+   * Initialize the video conference meeting
+   */
   const initializeMeeting = React.useCallback(async () => {
     if (!roomId) {
-      setConnectionError('No room ID provided');
+      setConnectionError("No room ID provided");
       return;
     }
 
     try {
-      await requestMediaPermissions();
-
       const appID = parseInt(process.env.NEXT_PUBLIC_ZEGO_APP_ID!);
       const serverSecret = process.env.NEXT_PUBLIC_ZEGO_SERVER_SECRET!;
 
-      if (isNaN(appID)) { throw new Error('Invalid App ID');}
-
-      if (!serverSecret) {
-        throw new Error('Server Secret is missing');
+      if (isNaN(appID)) {
+        throw new Error("Invalid App ID");
       }
 
+      if (!serverSecret) {
+        throw new Error("Server Secret is missing");
+      }
+
+      // Generate token with 5-hour duration
       const kitToken = ZegoUIKitPrebuilt.generateKitTokenForTest(
         appID,
         serverSecret,
         roomId,
         uuid(),
         fullName || "user" + Date.now(),
-        MEETING_DURATION
+        MEETING_DURATION // 5 hours in seconds
       );
 
       zegoRef.current = ZegoUIKitPrebuilt.create(kitToken);
@@ -102,7 +116,7 @@ const Room = ({ params }: RoomProps) => {
           container: myCallContainerRef.current,
           sharedLinks: [
             {
-              name: 'Personal link',
+              name: "Personal link",
               url: `${window.location.protocol}//${window.location.host}/room/${roomId}`,
             },
           ],
@@ -113,45 +127,88 @@ const Room = ({ params }: RoomProps) => {
           turnOnCameraWhenJoining: false,
           turnOnMicrophoneWhenJoining: false,
           preJoinViewConfig: {
-            title: 'Join Meeting',
-            message: 'Please test your devices before joining'
+            title: "Join Meeting",
+            message: "Please test your devices before joining",
           },
           onNetworkStatusError: (err: any) => {
-            console.error('Network error:', err);
-            setConnectionError('Network connection error. Attempting to reconnect...');
+            console.error("Network error:", err);
+            setConnectionError("Network connection error. Attempting to reconnect...");
+            // Attempt to reconnect after delay
             setTimeout(() => {
               cleanupMedia();
               initializeMeeting();
             }, RETRY_DELAY);
           },
           onConnectionStateChanged: (state: string) => {
-            if (state === 'CONNECTED') {
+            if (state === "CONNECTED") {
               setConnectionError(null);
             }
           },
-          onLeaveRoom: handleLeaveRoom,
+          onLeaveRoom: handleLeaveRoom, // Use new handler with quick redirect
           onDeviceError: (errorCode: any, message: string) => {
             console.error("Device error:", errorCode, message);
             setConnectionError(`Device error: ${message}`);
-          }
+          },
         });
       }
     } catch (error) {
       console.error("Zego initialization error:", error);
-      setConnectionError('Failed to initialize meeting. Please try again.');
+      setConnectionError("Failed to initialize meeting. Please try again.");
     }
   }, [roomId, fullName, handleLeaveRoom, cleanupMedia]);
 
-  React.useEffect(() => {
-    if (meetingStarted) {
-      initializeMeeting();
+  /**
+   * Device access check to ensure permissions are granted
+   */
+  const checkDeviceAccess = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: true,
+        video: true,
+      });
+      console.log("Device access granted");
+      stream.getTracks().forEach((track) => track.stop()); // Stop the stream immediately
+    } catch (error) {
+      console.error("Device access error:", error);
+      setConnectionError("Failed to access media devices");
     }
-    
+  };
+
+  /**
+   * List devices to ensure availability
+   */
+  const listDevices = async () => {
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const videoDevices = devices.filter((device) => device.kind === "videoinput");
+      const audioDevices = devices.filter((device) => device.kind === "audioinput");
+      console.log("Video Devices:", videoDevices);
+      console.log("Audio Devices:", audioDevices);
+      if (videoDevices.length === 0 || audioDevices.length === 0) {
+        setConnectionError("No video or audio devices detected");
+      }
+    } catch (error) {
+      console.error("Error listing devices:", error);
+      setConnectionError("Failed to detect devices");
+    }
+  };
+
+  /**
+   * Setup and cleanup effects
+   */
+  React.useEffect(() => {
+    checkDeviceAccess();
+    listDevices();
+    initializeMeeting();
+
     return () => {
       cleanupMedia();
     };
-  }, [initializeMeeting, cleanupMedia, meetingStarted]);
+  }, [initializeMeeting, cleanupMedia]);
 
+  /**
+   * Error state when no room ID is provided
+   */
   if (!roomId) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -163,25 +220,15 @@ const Room = ({ params }: RoomProps) => {
     );
   }
 
-  if (!meetingStarted) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <button
-          onClick={() => setMeetingStarted(true)}
-          className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
-        >
-          Start Meeting
-        </button>
-      </div>
-    );
-  }
-
+  /**
+   * Main render
+   */
   return (
     <>
       <div
         className="myCallContainer"
         ref={myCallContainerRef}
-        style={{ width: '100vw', height: '100vh' }}
+        style={{ width: "100vw", height: "100vh" }}
       />
       {connectionError && (
         <div className="fixed top-4 right-4 bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
