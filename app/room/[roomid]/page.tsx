@@ -78,11 +78,20 @@ const Room = ({ params }: RoomProps) => {
    * Initialize the video conference meeting
    */
   const initializeMeeting = React.useCallback(async () => {
-    if (!roomId) return;
+    if (!roomId) {
+      setConnectionError('No room ID provided');
+      return;
+    }
 
     try {
       const appID = parseInt(process.env.NEXT_PUBLIC_ZEGO_APP_ID!);
       const serverSecret = process.env.NEXT_PUBLIC_ZEGO_SERVER_SECRET!;
+
+      if (isNaN(appID)) { throw new Error('Invalid App ID');}
+
+      if (!serverSecret) {
+        throw new Error('Server Secret is missing');
+      }
 
       // Generate token with 5-hour duration
       const kitToken = ZegoUIKitPrebuilt.generateKitTokenForTest(
