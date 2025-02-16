@@ -7,9 +7,6 @@ import * as React from 'react';
 import { useSearchParams } from 'next/navigation';
 import { SpeedInsights } from "@vercel/speed-insights/next"
 
-/**
- * Type definitions for route parameters
- */
 interface RouteParams {
   roomid?: string;
 }
@@ -18,13 +15,6 @@ interface RoomProps {
   params: Promise<RouteParams>;
 }
 
-/**
- * Constants for timing and configuration
- * RETRY_DELAY: Time between retry attempts
- * JOIN_TIMEOUT: Maximum time to wait for join
- * MEETING_DURATION: 5 hours in seconds (5 * 60 * 60 = 18000)
- * LEAVE_REDIRECT_DELAY: Delay before redirecting after leaving room
- */
 const RETRY_DELAY = 5000;
 const JOIN_TIMEOUT = 8000;
 const MEETING_DURATION = 18000; // 5 hours in seconds
@@ -36,14 +26,11 @@ const Room = ({ params }: RoomProps) => {
   const roomId = searchParams.get('roomID') || paramsValue?.roomid;
   const { fullName } = useUser();
 
-  // Refs for managing component state
   const myCallContainerRef = React.useRef<HTMLDivElement | null>(null);
   const zegoRef = React.useRef<any>(null);
   const [connectionError, setConnectionError] = React.useState<string | null>(null);
+  const [meetingStarted, setMeetingStarted] = React.useState(false);
 
-  /**
-   * Cleanup function to stop all media tracks and clear resources
-   */
   const cleanupMedia = React.useCallback(() => {
     const mediaDevices = navigator.mediaDevices as any;
     if (mediaDevices?.getTracks) {
@@ -64,20 +51,23 @@ const Room = ({ params }: RoomProps) => {
     }
   }, []);
 
-  /**
-   * Handle room leave and redirect
-   */
   const handleLeaveRoom = React.useCallback(() => {
     cleanupMedia();
-    // Quick redirect after cleanup
     setTimeout(() => {
       window.location.href = '/';
     }, LEAVE_REDIRECT_DELAY);
   }, [cleanupMedia]);
 
-  /**
-   * Initialize the video conference meeting
-   */
+  const requestMediaPermissions = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+      stream.getTracks().forEach(track => track.stop());
+    } catch (error) {
+      console.error('Error accessing media devices:', error);
+      setConnectionError('Please allow access to microphone and camera.');
+    }
+  };
+
   const initializeMeeting = React.useCallback(async () => {
     if (!roomId) {
       setConnectionError('No room ID provided');
@@ -85,6 +75,8 @@ const Room = ({ params }: RoomProps) => {
     }
 
     try {
+      await requestMediaPermissions();
+
       const appID = parseInt(process.env.NEXT_PUBLIC_ZEGO_APP_ID!);
       const serverSecret = process.env.NEXT_PUBLIC_ZEGO_SERVER_SECRET!;
 
@@ -94,14 +86,13 @@ const Room = ({ params }: RoomProps) => {
         throw new Error('Server Secret is missing');
       }
 
-      // Generate token with 5-hour duration
       const kitToken = ZegoUIKitPrebuilt.generateKitTokenForTest(
         appID,
         serverSecret,
         roomId,
         uuid(),
         fullName || "user" + Date.now(),
-        MEETING_DURATION // 5 hours in seconds
+        MEETING_DURATION
       );
 
       zegoRef.current = ZegoUIKitPrebuilt.create(kitToken);
@@ -128,7 +119,6 @@ const Room = ({ params }: RoomProps) => {
           onNetworkStatusError: (err: any) => {
             console.error('Network error:', err);
             setConnectionError('Network connection error. Attempting to reconnect...');
-            // Attempt to reconnect after delay
             setTimeout(() => {
               cleanupMedia();
               initializeMeeting();
@@ -139,7 +129,7 @@ const Room = ({ params }: RoomProps) => {
               setConnectionError(null);
             }
           },
-          onLeaveRoom: handleLeaveRoom, // Use new handler with quick redirect
+          onLeaveRoom: handleLeaveRoom,
           onDeviceError: (errorCode: any, message: string) => {
             console.error("Device error:", errorCode, message);
             setConnectionError(`Device error: ${message}`);
@@ -152,20 +142,16 @@ const Room = ({ params }: RoomProps) => {
     }
   }, [roomId, fullName, handleLeaveRoom, cleanupMedia]);
 
-  /**
-   * Setup and cleanup effects
-   */
   React.useEffect(() => {
-    initializeMeeting();
+    if (meetingStarted) {
+      initializeMeeting();
+    }
     
     return () => {
       cleanupMedia();
     };
-  }, [initializeMeeting, cleanupMedia]);
+  }, [initializeMeeting, cleanupMedia, meetingStarted]);
 
-  /**
-   * Error state when no room ID is provided
-   */
   if (!roomId) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -177,9 +163,19 @@ const Room = ({ params }: RoomProps) => {
     );
   }
 
-  /**
-   * Main render
-   */
+  if (!meetingStarted) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <button
+          onClick={() => setMeetingStarted(true)}
+          className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
+        >
+          Start Meeting
+        </button>
+      </div>
+    );
+  }
+
   return (
     <>
       <div
